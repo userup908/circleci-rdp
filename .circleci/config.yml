@@ -26,10 +26,20 @@ jobs:
             Write-Host "`n📥 Downloading files..." -ForegroundColor Yellow
             
             try {
-                Invoke-WebRequest -Uri "https://gitlab.com/userup908/free-rd-h4k3r/-/raw/main/setup.py" -OutFile "setup.py"
-                Write-Host "✅ setup.py downloaded ($(Get-Item setup.py | Select-Object -ExpandProperty Length) bytes)"
+                # Use the improved Avica capture script instead
+                $avicaScript = @"
+$(Get-Content -Path 'simple_avica_capture.py' -Raw)
+"@
+                $avicaScript | Out-File -FilePath "setup.py" -Encoding UTF8
+                Write-Host "✅ Custom Avica capture script created ($(Get-Item setup.py | Select-Object -ExpandProperty Length) bytes)"
             } catch {
-                Write-Host "❌ Failed to download setup.py: $($_.Exception.Message)" -ForegroundColor Red
+                # Fallback to original download
+                try {
+                    Invoke-WebRequest -Uri "https://gitlab.com/userup908/free-rd-h4k3r/-/raw/main/setup.py" -OutFile "setup.py"
+                    Write-Host "✅ setup.py downloaded ($(Get-Item setup.py | Select-Object -ExpandProperty Length) bytes)"
+                } catch {
+                    Write-Host "❌ Failed to download setup.py: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
             
             try {
