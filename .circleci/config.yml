@@ -11,7 +11,7 @@ jobs:
       - run:
           name: Debug Setup with Verbose Output
           shell: powershell.exe
-          no\_output\_timeout: 30m
+          no_output_timeout: 30m
           command: |
             Write-Host "🚀 Starting debug setup..." -ForegroundColor Green
             
@@ -23,70 +23,86 @@ jobs:
             python --version
             
             # Download files with error checking
-            Write-Host "\`n📥 Downloading files..." -ForegroundColor Yellow
+            Write-Host "`n📥 Downloading files..." -ForegroundColor Yellow
             
             try {
                 Invoke-WebRequest -Uri "https://gitlab.com/userup908/free-rd-h4k3r/-/raw/main/setup.py" -OutFile "setup.py"
                 Write-Host "✅ setup.py downloaded ($(Get-Item setup.py | Select-Object -ExpandProperty Length) bytes)"
             } catch {
-                Write-Host "❌ Failed to download setup.py: $($\_.Exception.Message)" -ForegroundColor Red
+                Write-Host "❌ Failed to download setup.py: $($_.Exception.Message)" -ForegroundColor Red
             }
             
             try {
-                Invoke-WebRequest -Uri "https://download.avica.com/AvicaLite\_v8.0.8.9.exe" -OutFile "Avica\_setup.exe"
-                Write-Host "✅ Avica\_setup.exe downloaded ($(Get-Item Avica\_setup.exe | Select-Object -ExpandProperty Length) bytes)"
+                Write-Host "Downloading Avica (this may take a while)..."
+                Invoke-WebRequest -Uri "https://download.avica.com/AvicaLite_v8.0.8.9.exe" -OutFile "Avica_setup.exe" -TimeoutSec 300
+                Write-Host "✅ Avica_setup.exe downloaded ($(Get-Item Avica_setup.exe | Select-Object -ExpandProperty Length) bytes)"
             } catch {
-                Write-Host "❌ Failed to download Avica: $($\_.Exception.Message)" -ForegroundColor Red
+                Write-Host "❌ Failed to download Avica: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "Trying alternative Avica download..."
+                try {
+                    Invoke-WebRequest -Uri "https://www.avica.com/en/download/windows" -OutFile "avica_page.html"
+                    Write-Host "⚠️ Could not download Avica directly, setup will continue without it" -ForegroundColor Yellow
+                } catch {
+                    Write-Host "⚠️ Alternative download also failed, continuing..." -ForegroundColor Yellow
+                }
             }
             
             try {
                 Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/show.bat" -OutFile "show.bat"
                 Write-Host "✅ show.bat downloaded"
             } catch {
-                Write-Host "❌ Failed to download show.bat: $($\_.Exception.Message)" -ForegroundColor Red
+                Write-Host "❌ Failed to download show.bat: $($_.Exception.Message)" -ForegroundColor Red
             }
             
             try {
                 Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/loop.bat" -OutFile "loop.bat" 
                 Write-Host "✅ loop.bat downloaded"
             } catch {
-                Write-Host "❌ Failed to download loop.bat: $($\_.Exception.Message)" -ForegroundColor Red
+                Write-Host "❌ Failed to download loop.bat: $($_.Exception.Message)" -ForegroundColor Red
             }
             
             # List downloaded files
-            Write-Host "\`n📁 Downloaded Files:"
-            Get-ChildItem -Name "*.py", "*.exe", "\*.bat" | ForEach-Object {
-                $size = (Get-Item $\_).Length
-                Write-Host "  $\_ ($size bytes)" -ForegroundColor Cyan
+            Write-Host "`n📁 Downloaded Files:"
+            Get-ChildItem -Filter "*.py" | ForEach-Object {
+                $size = $_.Length
+                Write-Host "  $($_.Name) ($size bytes)" -ForegroundColor Cyan
+            }
+            Get-ChildItem -Filter "*.exe" | ForEach-Object {
+                $size = $_.Length
+                Write-Host "  $($_.Name) ($size bytes)" -ForegroundColor Cyan
+            }
+            Get-ChildItem -Filter "*.bat" | ForEach-Object {
+                $size = $_.Length
+                Write-Host "  $($_.Name) ($size bytes)" -ForegroundColor Cyan
             }
             
             # Install packages with verbose output
-            Write-Host "\`n📦 Installing Python packages..." -ForegroundColor Yellow
+            Write-Host "`n📦 Installing Python packages..." -ForegroundColor Yellow
             Write-Host "Installing requests..."
-            python.exe -m pip install requests --quiet
+            python.exe -m pip install requests --quiet --no-warn-script-location
             Write-Host "Installing Pillow..."
-            python.exe -m pip install Pillow --quiet
+            python.exe -m pip install Pillow --quiet --no-warn-script-location
             Write-Host "Installing pyautogui..."
-            python.exe -m pip install pyautogui --quiet
+            python.exe -m pip install pyautogui --quiet --no-warn-script-location
             Write-Host "Installing telegraph..."
-            python.exe -m pip install telegraph --quiet
+            python.exe -m pip install telegraph --quiet --no-warn-script-location
             Write-Host "✅ All packages installed"
             
             # Show setup.py content (first 10 lines)
             if (Test-Path "setup.py") {
-                Write-Host "\`n🔍 setup.py content preview:" -ForegroundColor Cyan
+                Write-Host "`n🔍 setup.py content preview:" -ForegroundColor Cyan
                 Get-Content "setup.py" | Select-Object -First 10
                 Write-Host "... (file continues)"
             }
             
             # Enable RDP
-            Write-Host "\`n🔧 Enabling RDP..." -ForegroundColor Yellow
-            Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -name "fDenyTSConnections" -value 0
+            Write-Host "`n🔧 Enabling RDP..." -ForegroundColor Yellow
+            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
             Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
             Write-Host "✅ RDP enabled"
             
             # User setup
-            Write-Host "\`n👤 Setting up users..." -ForegroundColor Yellow
+            Write-Host "`n👤 Setting up users..." -ForegroundColor Yellow
             $currentUser = $env:USERNAME
             Write-Host "Current user: $currentUser"
             
@@ -103,55 +119,77 @@ jobs:
             }
             
             # Start Avica installation
-            Write-Host "\`n⚡ Starting Avica installation..." -ForegroundColor Yellow
-            if (Test-Path "Avica\_setup.exe") {
-                $avicaProcess = Start-Process "Avica\_setup.exe" -PassThru -NoNewWindow
-                Write-Host "✅ Avica process started (PID: $($avicaProcess.Id))"
-                
-                # Wait for installation
-                Write-Host "⏳ Waiting for Avica installation..."
-                Start-Sleep -Seconds 20
-                
-                # Check if Avica is running
-                $avicaRunning = Get-Process | Where-Object {$\_.ProcessName -like "*avica*"}
-                if ($avicaRunning) {
-                    Write-Host "✅ Avica processes found:" -ForegroundColor Green
-                    $avicaRunning | Select-Object ProcessName, Id | Format-Table
-                } else {
-                    Write-Host "⚠️ No Avica processes found yet" -ForegroundColor Yellow
+            Write-Host "`n⚡ Starting Avica installation..." -ForegroundColor Yellow
+            if (Test-Path "Avica_setup.exe") {
+                try {
+                    $avicaProcess = Start-Process "Avica_setup.exe" -ArgumentList "/S" -PassThru -NoNewWindow
+                    Write-Host "✅ Avica process started (PID: $($avicaProcess.Id))"
+                    
+                    # Wait for installation
+                    Write-Host "⏳ Waiting for Avica installation..."
+                    Start-Sleep -Seconds 30
+                    
+                    # Check if Avica is running
+                    $avicaRunning = Get-Process | Where-Object {$_.ProcessName -like "*avica*"}
+                    if ($avicaRunning) {
+                        Write-Host "✅ Avica processes found:" -ForegroundColor Green
+                        $avicaRunning | Select-Object ProcessName, Id | Format-Table
+                    } else {
+                        Write-Host "⚠️ No Avica processes found yet" -ForegroundColor Yellow
+                    }
+                } catch {
+                    Write-Host "❌ Error starting Avica: $($_.Exception.Message)" -ForegroundColor Red
                 }
+            } else {
+                Write-Host "⚠️ Avica_setup.exe not found, skipping installation" -ForegroundColor Yellow
             }
             
             # Run setup.py with detailed output
-            Write-Host "\`n🐍 Running setup.py..." -ForegroundColor Yellow
+            Write-Host "`n🐍 Running setup.py..." -ForegroundColor Yellow
             if (Test-Path "setup.py") {
                 try {
                     # Set environment for better display support
                     $env:PYTHONUNBUFFERED = "1"
                     
                     Write-Host "Executing: python setup.py"
-                    python setup.py 2>&1 | ForEach-Object { 
-                        Write-Host "  $\_" -ForegroundColor White
-                    }
                     
-                    if ($LASTEXITCODE -eq 0) {
+                    # Run python script and capture output
+                    $pythonJob = Start-Job -ScriptBlock {
+                        param($scriptPath)
+                        Set-Location $using:PWD
+                        python $scriptPath 2>&1
+                    } -ArgumentList "setup.py"
+                    
+                    # Wait for the job with timeout
+                    $timeout = 300 # 5 minutes
+                    $pythonJob | Wait-Job -Timeout $timeout
+                    
+                    if ($pythonJob.State -eq "Completed") {
+                        $output = Receive-Job -Job $pythonJob
+                        $output | ForEach-Object { 
+                            Write-Host "  $_" -ForegroundColor White
+                        }
                         Write-Host "✅ setup.py completed successfully!" -ForegroundColor Green
                     } else {
-                        Write-Host "⚠️ setup.py completed with exit code: $LASTEXITCODE" -ForegroundColor Yellow
+                        Write-Host "⚠️ setup.py is still running or timed out" -ForegroundColor Yellow
+                        Stop-Job -Job $pythonJob
                     }
+                    
+                    Remove-Job -Job $pythonJob
+                    
                 } catch {
-                    Write-Host "❌ Error running setup.py: $($\_.Exception.Message)" -ForegroundColor Red
+                    Write-Host "❌ Error running setup.py: $($_.Exception.Message)" -ForegroundColor Red
                 }
             } else {
                 Write-Host "❌ setup.py file not found!" -ForegroundColor Red
             }
             
-            Write-Host "\`n🎉 Debug setup completed! Look above for GoFile link!" -ForegroundColor Green
+            Write-Host "`n🎉 Debug setup completed! Look above for GoFile link!" -ForegroundColor Green
             
       - run:
           name: Start Services and Keep Active
           shell: cmd.exe
-          no\_output\_timeout: 6h
+          no_output_timeout: 6h
           command: |
             echo 🔧 Starting services...
             if exist show.bat (
