@@ -42,14 +42,52 @@ jobs:
             net user $env:USERNAME TheDisa1a
             Write-Host "RDP configured"
             
-            Write-Host "Installing Avica..." -ForegroundColor Yellow
+            Write-Host "Installing Avica with timeout..." -ForegroundColor Yellow
             if (Test-Path "Avica_setup.exe") {
-                Start-Process "Avica_setup.exe" -ArgumentList "/S" -Wait -WindowStyle Hidden
-                Write-Host "Avica installation completed"
-                Start-Sleep -Seconds 20
+                # Try multiple installation methods
+                try {
+                    # Method 1: Silent install with timeout
+                    $job = Start-Job -ScriptBlock {
+                        Start-Process "C:\Users\circleci\project\Avica_setup.exe" -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES", "/SP-" -Wait
+                    }
+                    
+                    # Wait maximum 60 seconds for installation
+                    if (Wait-Job $job -Timeout 60) {
+                        Write-Host "Avica installed successfully"
+                        Remove-Job $job
+                    } else {
+                        Write-Host "Installation timeout, killing process..."
+                        Stop-Job $job
+                        Remove-Job $job
+                        
+                        # Kill any hanging installer processes
+                        Get-Process | Where-Object {$_.ProcessName -like "*Avica*"} | Stop-Process -Force -ErrorAction SilentlyContinue
+                    }
+                } catch {
+                    Write-Host "Installation method 1 failed, trying method 2..."
+                    
+                    # Method 2: Direct execution with different parameters
+                    try {
+                        $process = Start-Process "Avica_setup.exe" -ArgumentList "/S" -PassThru -NoNewWindow
+                        
+                        # Wait up to 45 seconds
+                        if (!$process.WaitForExit(45000)) {
+                            Write-Host "Killing hanging installer process..."
+                            $process.Kill()
+                        }
+                        
+                        Write-Host "Installation attempt completed"
+                    } catch {
+                        Write-Host "Installation method 2 also failed, continuing anyway..."
+                    }
+                }
             }
             
-            Write-Host "Creating setup script..." -ForegroundColor Yellow
+            # Give some time for installation to settle
+            Write-Host "Waiting for installation to settle..."
+            Start-Sleep -Seconds 10
+            
+            Write-Host "Creating automation script..." -ForegroundColor Yellow
             
             $setupScript = @'
             import pyautogui as pag
@@ -58,8 +96,8 @@ jobs:
             import os
             import subprocess
 
-            print("Starting Avica automation script...")
-            time.sleep(20)
+            print("Starting Avica automation...")
+            time.sleep(10)
 
             img_filename = 'NewAvicaRemoteID.png'
 
@@ -82,89 +120,112 @@ jobs:
                     return None
 
             def find_avica():
+                print("Searching for Avica executable...")
                 paths = [
                     r"C:\Program Files (x86)\Avica\Avica.exe",
                     r"C:\Program Files\Avica\Avica.exe",
                     r"C:\Program Files (x86)\AvicaLite\Avica.exe",
-                    r"C:\Program Files\AvicaLite\Avica.exe"
+                    r"C:\Program Files\AvicaLite\Avica.exe",
+                    r"C:\Users\circleci\AppData\Local\Avica\Avica.exe",
+                    r"C:\Users\circleci\AppData\Roaming\Avica\Avica.exe"
                 ]
                 
                 for path in paths:
+                    print(f"Checking: {path}")
                     if os.path.exists(path):
-                        print(f"Found Avica: {path}")
+                        print(f"FOUND Avica at: {path}")
                         return path
                 
-                for root_dir in [r"C:\Program Files", r"C:\Program Files (x86)"]:
+                # Deep search if not found in standard locations
+                print("Performing deep search...")
+                for root_dir in [r"C:\Program Files", r"C:\Program Files (x86)", r"C:\Users"]:
                     try:
                         for root, dirs, files in os.walk(root_dir):
                             for file in files:
                                 if file.lower() == 'avica.exe':
                                     full_path = os.path.join(root, file)
-                                    print(f"Found Avica: {full_path}")
+                                    print(f"FOUND Avica at: {full_path}")
                                     return full_path
                     except:
                         continue
                 
-                print("Avica not found")
+                print("Avica executable not found")
                 return None
 
             def launch_avica():
                 avica_path = find_avica()
                 if avica_path:
-                    print("Launching Avica...")
-                    subprocess.Popen([avica_path])
-                    time.sleep(15)
-                    return True
-                return False
-
-            def focus_avica():
-                try:
-                    ps_cmd = 'Add-Type -TypeDefinition @"\nusing System;\nusing System.Runtime.InteropServices;\npublic class WinAPI {\n    [DllImport(\\"user32.dll\\")] public static extern bool SetForegroundWindow(IntPtr hWnd);\n    [DllImport(\\"user32.dll\\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\n}\n"@\n$procs = Get-Process | Where-Object {$_.ProcessName -like \\"*Avica*\\" -and $_.MainWindowHandle -ne 0}\nforeach ($p in $procs) {\n    [WinAPI]::ShowWindow($p.MainWindowHandle, 9)\n    [WinAPI]::SetForegroundWindow($p.MainWindowHandle)\n}'
-                    subprocess.run(['powershell', '-Command', ps_cmd], timeout=10)
-                    time.sleep(3)
-                    return True
-                except:
+                    print(f"Launching Avica from: {avica_path}")
+                    try:
+                        subprocess.Popen([avica_path])
+                        time.sleep(20)  # Wait for Avica to fully load
+                        return True
+                    except Exception as e:
+                        print(f"Failed to launch Avica: {e}")
+                        return False
+                else:
+                    print("Cannot launch Avica - executable not found")
                     return False
 
             def capture_screen():
-                print("Taking screenshot...")
-                focus_avica()
+                print("Capturing screenshot...")
+                
+                # Try to bring any Avica window to front
+                try:
+                    ps_cmd = 'Get-Process | Where-Object {$_.ProcessName -like "*Avica*" -and $_.MainWindowHandle -ne 0} | ForEach-Object { Add-Type -TypeDefinition \'using System; using System.Runtime.InteropServices; public class WinAPI { [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow); }\'; [WinAPI]::ShowWindow($_.MainWindowHandle, 9); [WinAPI]::SetForegroundWindow($_.MainWindowHandle) }'
+                    subprocess.run(['powershell', '-Command', ps_cmd], timeout=5)
+                    time.sleep(2)
+                except:
+                    print("Could not focus Avica window")
+                
+                # Click center of screen to ensure focus
                 pag.click(500, 400)
                 time.sleep(2)
+                
+                # Take screenshot
                 screenshot = pag.screenshot()
                 screenshot.save(img_filename)
-                print(f"Screenshot saved: {img_filename}")
+                
+                # Check screenshot size
+                size = os.path.getsize(img_filename)
+                print(f"Screenshot saved: {img_filename} ({size} bytes)")
                 return True
 
-            print("=== Avica Automation Started ===")
-
-            if launch_avica():
-                print("Avica launched successfully")
+            # Main execution
+            print("=== Starting Avica Process ===")
+            
+            # Try to launch Avica
+            avica_launched = launch_avica()
+            
+            if not avica_launched:
+                print("Avica not launched, but taking screenshot anyway...")
             else:
-                print("Could not launch Avica, taking desktop screenshot anyway")
-
-            print("Waiting for interface to load...")
-            time.sleep(10)
-
+                print("Avica launched, waiting for interface...")
+                time.sleep(10)
+            
+            # Take screenshot regardless
             capture_screen()
-
-            print("Uploading screenshot...")
+            
+            # Upload screenshot
+            print("Uploading to GoFile...")
             link = upload_to_gofile(img_filename)
+            
             if link:
-                print(f"SUCCESS! Screenshot uploaded: {link}")
+                print(f"SUCCESS! Screenshot uploaded!")
+                print(f"GoFile Link: {link}")
             else:
-                print("Upload failed")
-
+                print("Failed to upload screenshot")
+            
             print("=== Process Complete ===")
             '@
             
             $setupScript | Out-File -FilePath "setup.py" -Encoding UTF8
-            Write-Host "Setup script created"
+            Write-Host "Automation script created"
             
             Write-Host "Running automation script..." -ForegroundColor Yellow
             python setup.py
             
-            Write-Host "All done!" -ForegroundColor Green
+            Write-Host "All tasks completed!" -ForegroundColor Green
 
       - run:
           name: Keep Session Active  
