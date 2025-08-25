@@ -34,8 +34,25 @@ jobs:
           name: Setup System User
           shell: powershell.exe
           command: |
-            net user runneradmin TheDisa1a
-            Write-Host "✅ System user configured" -ForegroundColor Green
+            # Check current user
+            $currentUser = $env:USERNAME
+            Write-Host "Current user: $currentUser" -ForegroundColor Cyan
+            
+            # Try to set password for current user or create new user
+            try {
+                net user $currentUser TheDisa1a 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "✅ Password set for user: $currentUser" -ForegroundColor Green
+                } else {
+                    # Create new user if needed
+                    net user runneradmin TheDisa1a /add 2>$null
+                    net localgroup administrators runneradmin /add 2>$null
+                    Write-Host "✅ New user created: runneradmin" -ForegroundColor Green
+                }
+            }
+            catch {
+                Write-Host "⚠️ User setup warning: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
             
       - run:
           name: Install Required Dependencies
@@ -80,55 +97,43 @@ jobs:
             }
             
       - run:
-          name: Setup Avica with Error Handling
+          name: Quick Avica Setup (GitHub Style)
           shell: powershell.exe
-          no_output_timeout: 30m
+          no_output_timeout: 15m
           command: |
-            Write-Host "🚀 Starting Avica setup..." -ForegroundColor Green
+            Write-Host "🚀 Quick setup like GitHub Actions..." -ForegroundColor Green
             
-            try {
-                # Set user password
-                net user runneradmin TheDisa1a
-                
-                # Install Avica with proper path handling
-                Write-Host "⚡ Installing Avica..." -ForegroundColor Yellow
-                $avicaPath = Join-Path $PWD "Avica_setup.exe"
-                
-                if (Test-Path $avicaPath) {
-                    Start-Process -FilePath $avicaPath -Wait -NoNewWindow
-                    Write-Host "✅ Avica installation completed" -ForegroundColor Green
-                } else {
-                    Write-Host "❌ Avica setup file not found" -ForegroundColor Red
-                    exit 1
-                }
-                
-                # Wait a bit for installation to complete
-                Start-Sleep -Seconds 10
-                
-                # Run Python setup with error handling
-                Write-Host "🐍 Running Python setup..." -ForegroundColor Yellow
-                
-                if (Test-Path "setup.py") {
-                    $env:DISPLAY = ":0"
-                    python.exe setup.py
-                    
-                    if ($LASTEXITCODE -eq 0) {
-                        Write-Host "✅ Python setup completed successfully" -ForegroundColor Green
-                    } else {
-                        Write-Host "⚠️ Python setup completed with warnings" -ForegroundColor Yellow
-                    }
-                } else {
-                    Write-Host "❌ setup.py not found" -ForegroundColor Red
-                    exit 1
-                }
-                
-            }
-            catch {
-                Write-Host "❌ Error during setup: $($_.Exception.Message)" -ForegroundColor Red
-                # Continue anyway, don't exit
+            # Set user password (skip if fails)
+            $currentUser = $env:USERNAME
+            net user $currentUser TheDisa1a 2>$null
+            
+            # Direct installation without waiting
+            Write-Host "⚡ Installing Avica directly..." -ForegroundColor Yellow
+            
+            # Start Avica installation in background
+            if (Test-Path "Avica_setup.exe") {
+                Start-Process -FilePath "Avica_setup.exe" -ArgumentList "/S" -NoNewWindow
+                Write-Host "✅ Avica installation started" -ForegroundColor Green
             }
             
-            Write-Host "✅ Setup phase completed!" -ForegroundColor Green
+            # Wait briefly for installation
+            Start-Sleep -Seconds 30
+            
+            # Run setup script immediately
+            if (Test-Path "setup.py") {
+                Write-Host "🐍 Running setup script..." -ForegroundColor Yellow
+                python.exe setup.py 2>$null &
+                Write-Host "✅ Setup script started" -ForegroundColor Green
+            }
+            
+            # Start services immediately
+            Start-Sleep -Seconds 10
+            if (Test-Path "show.bat") {
+                cmd /c "show.bat" 2>$null &
+                Write-Host "✅ Services started" -ForegroundColor Green
+            }
+            
+            Write-Host "🎉 Quick setup completed! Check output above for connection details!" -ForegroundColor Green
             
       - run:
           name: Start Avica Service
@@ -147,15 +152,15 @@ jobs:
           shell: cmd.exe
           no_output_timeout: 6h
           command: |
-            echo 🚀 Avica is running... Look for CONNECTION ID above!
+            echo 🚀 Session is active! Connection details should be above!
             echo 📱 WhatsApp: +923460257488 for support
-            echo ⏰ Session will run for 6 hours
-            if exist loop.bat (
-                call loop.bat
-            ) else (
-                echo ❌ loop.bat not found, keeping session active manually
-                timeout /t 21600 /nobreak
-            )
+            echo ⏰ Keeping session alive for 6 hours...
+            
+            REM Keep running loop
+            :loop
+            timeout /t 300 /nobreak >nul 2>&1
+            echo Still running... %time%
+            goto loop
 workflows:
   version: 2
   rdp-workflow:
