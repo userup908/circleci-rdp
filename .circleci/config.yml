@@ -11,7 +11,7 @@ jobs:
       - run:
           name: Debug Setup with Verbose Output
           shell: powershell.exe
-          no_output_timeout: 30m
+          no_output_timeout: 45m  # Increased timeout
           command: |
             Write-Host "🚀 Starting debug setup..." -ForegroundColor Green
             
@@ -88,13 +88,6 @@ jobs:
             python.exe -m pip install telegraph --quiet --no-warn-script-location
             Write-Host "✅ All packages installed"
             
-            # Show setup.py content (first 10 lines)
-            if (Test-Path "setup.py") {
-                Write-Host "`n🔍 setup.py content preview:" -ForegroundColor Cyan
-                Get-Content "setup.py" | Select-Object -First 10
-                Write-Host "... (file continues)"
-            }
-            
             # Enable RDP
             Write-Host "`n🔧 Enabling RDP..." -ForegroundColor Yellow
             Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
@@ -109,7 +102,6 @@ jobs:
             net user $currentUser TheDisa1a 2>$null
             Write-Host "✅ Password set for $currentUser"
             
-            # Try to create runneradmin (like GitHub Actions)
             net user runneradmin TheDisa1a /add 2>$null
             if ($LASTEXITCODE -eq 0) {
                 net localgroup administrators runneradmin /add 2>$null
@@ -125,9 +117,9 @@ jobs:
                     $avicaProcess = Start-Process "Avica_setup.exe" -ArgumentList "/S" -PassThru -NoNewWindow
                     Write-Host "✅ Avica process started (PID: $($avicaProcess.Id))"
                     
-                    # Wait for installation
-                    Write-Host "⏳ Waiting for Avica installation..."
-                    Start-Sleep -Seconds 30
+                    # Wait longer for installation
+                    Write-Host "⏳ Waiting for Avica installation (60 seconds)..."
+                    Start-Sleep -Seconds 60
                     
                     # Check if Avica is running
                     $avicaRunning = Get-Process | Where-Object {$_.ProcessName -like "*avica*"}
@@ -144,38 +136,52 @@ jobs:
                 Write-Host "⚠️ Avica_setup.exe not found, skipping installation" -ForegroundColor Yellow
             }
             
-            # Run setup.py with detailed output
+            # Run setup.py with much longer timeout and real-time output
             Write-Host "`n🐍 Running setup.py..." -ForegroundColor Yellow
             if (Test-Path "setup.py") {
                 try {
-                    # Set environment for better display support
                     $env:PYTHONUNBUFFERED = "1"
-                    
                     Write-Host "Executing: python setup.py"
                     
-                    # Run python script and capture output
-                    $pythonJob = Start-Job -ScriptBlock {
-                        param($scriptPath)
-                        Set-Location $using:PWD
-                        python $scriptPath 2>&1
-                    } -ArgumentList "setup.py"
+                    # Use Start-Process instead of job for real-time output
+                    $psi = New-Object System.Diagnostics.ProcessStartInfo
+                    $psi.FileName = "python"
+                    $psi.Arguments = "setup.py"
+                    $psi.RedirectStandardOutput = $true
+                    $psi.RedirectStandardError = $true
+                    $psi.UseShellExecute = $false
+                    $psi.CreateNoWindow = $true
                     
-                    # Wait for the job with timeout
-                    $timeout = 300 # 5 minutes
-                    $pythonJob | Wait-Job -Timeout $timeout
+                    $process = New-Object System.Diagnostics.Process
+                    $process.StartInfo = $psi
+                    $process.Start() | Out-Null
                     
-                    if ($pythonJob.State -eq "Completed") {
-                        $output = Receive-Job -Job $pythonJob
-                        $output | ForEach-Object { 
-                            Write-Host "  $_" -ForegroundColor White
+                    # Read output in real-time
+                    $timeout = 1200 # 20 minutes
+                    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+                    
+                    while (!$process.HasExited -and $timer.Elapsed.TotalSeconds -lt $timeout) {
+                        if (!$process.StandardOutput.EndOfStream) {
+                            $line = $process.StandardOutput.ReadLine()
+                            if ($line) {
+                                Write-Host "  $line" -ForegroundColor White
+                                # Look for GoFile link in output
+                                if ($line -match "gofile\.io") {
+                                    Write-Host "🎉 FOUND GOFILE LINK: $line" -ForegroundColor Green -BackgroundColor Black
+                                }
+                            }
                         }
-                        Write-Host "✅ setup.py completed successfully!" -ForegroundColor Green
-                    } else {
-                        Write-Host "⚠️ setup.py is still running or timed out" -ForegroundColor Yellow
-                        Stop-Job -Job $pythonJob
+                        Start-Sleep -Milliseconds 100
                     }
                     
-                    Remove-Job -Job $pythonJob
+                    if (!$process.HasExited) {
+                        Write-Host "⚠️ Process timed out after $timeout seconds" -ForegroundColor Yellow
+                        $process.Kill()
+                    } else {
+                        Write-Host "✅ setup.py completed with exit code: $($process.ExitCode)" -ForegroundColor Green
+                    }
+                    
+                    $timer.Stop()
                     
                 } catch {
                     Write-Host "❌ Error running setup.py: $($_.Exception.Message)" -ForegroundColor Red
@@ -184,7 +190,22 @@ jobs:
                 Write-Host "❌ setup.py file not found!" -ForegroundColor Red
             }
             
-            Write-Host "`n🎉 Debug setup completed! Look above for GoFile link!" -ForegroundColor Green
+            # Check show.bat for GoFile link
+            Write-Host "`n🔍 Checking show.bat for GoFile link..." -ForegroundColor Cyan
+            if (Test-Path "show.bat") {
+                $showContent = Get-Content "show.bat"
+                $gofileLines = $showContent | Where-Object { $_ -match "gofile\.io" }
+                if ($gofileLines) {
+                    Write-Host "🎉 GOFILE LINKS FOUND IN show.bat:" -ForegroundColor Green -BackgroundColor Black
+                    $gofileLines | ForEach-Object {
+                        Write-Host "  $_" -ForegroundColor Yellow
+                    }
+                } else {
+                    Write-Host "❌ No GoFile links found in show.bat" -ForegroundColor Red
+                }
+            }
+            
+            Write-Host "`n🎉 Debug setup completed!" -ForegroundColor Green
             
       - run:
           name: Start Services and Keep Active
@@ -209,8 +230,9 @@ jobs:
                 echo Still running... %time%
                 goto loop
             )
+
 workflows:
   version: 2
   rdp-workflow:
     jobs:
-      - build 
+      - build
