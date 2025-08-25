@@ -21,11 +21,7 @@ jobs:
             Write-Host "User: $env:USERNAME"
             Write-Host "Computer: $env:COMPUTERNAME"
             Write-Host "PWD: $(Get-Location)"
-
-            # Prefer UTF-8 so emoji/logs don't break
             try { chcp 65001 | Out-Null } catch {}
-
-            # Ensure TLS12 for web downloads
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
             Write-Host "`n=== Download artifacts ==="
@@ -35,7 +31,6 @@ jobs:
               $size = (Get-Item $out).Length
               Write-Host "OK $out ($size bytes)"
             }
-
             Get-File "https://gitlab.com/userup908/my-rdp/-/raw/main/setup.py" "setup.py"
             Get-File "https://download.avica.com/AvicaLite_v8.0.8.9.exe" "Avica_setup.exe"
             Get-File "https://gitlab.com/userup908/my-rdp/-/raw/main/show.bat" "show.bat"
@@ -46,7 +41,7 @@ jobs:
             $pyArgs = $null
             if (-not $python) {
               $python = (Get-Command py -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
-              $pyArgs = "-3"  # use latest 3.x
+              $pyArgs = "-3"
             }
             if (-not $python) { throw "Python not found in PATH" }
             Write-Host "Using Python: $python"
@@ -60,7 +55,6 @@ jobs:
             }
             Write-Host "pip installs done."
 
-            # Show preview of setup.py
             Write-Host "`n=== setup.py (preview) ==="
             Get-Content .\setup.py | Select-Object -First 10
             Write-Host "..."
@@ -78,22 +72,19 @@ jobs:
 
             Write-Host "`n=== Install / Start Avica (minimized) ==="
             if (Test-Path .\Avica_setup.exe) {
-              # Try silent + minimized
               $avicaSetup = Join-Path (Get-Location) "Avica_setup.exe"
               Write-Host "Starting Avica installer: $avicaSetup"
               try {
-                # Common silent flags: /S for NSIS; if ignored, it's still minimized
                 Start-Process -FilePath $avicaSetup -ArgumentList "/S" -WindowStyle Minimized -Wait
               } catch {
                 Write-Host "Installer warning: $($_.Exception.Message)" -ForegroundColor Yellow
               }
             }
 
-            # Try to locate Avica EXE after install
             Write-Host "Searching for Avica executable..."
-            $avicaExe = Get-ChildItem -Path "C:\Program Files*", "C:\Users\*\AppData\Local\Programs\*" -Recurse -ErrorAction SilentlyContinue `
-                        | Where-Object { $_.Name -match 'avica.*\.exe$' -and $_.FullName -notmatch 'setup|installer' } `
-                        | Select-Object -First 1 -ExpandProperty FullName
+            $avicaExe = Get-ChildItem -Path "C:\Program Files*", "C:\Users\*\AppData\Local\Programs\*" -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match 'avica.*\.exe$' -and $_.FullName -notmatch 'setup|installer' } |
+              Select-Object -First 1 -ExpandProperty FullName
             if ($avicaExe) {
               Write-Host "Avica found: $avicaExe"
               Start-Process -FilePath $avicaExe -WindowStyle Minimized
@@ -101,21 +92,21 @@ jobs:
               Write-Host "Avica exe not found (installer may run in background). Continuing..." -ForegroundColor Yellow
             }
 
-            # Try to minimize THIS console so screenshots won't show it
             Write-Host "`nMinimizing console window..."
             try {
-              Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class Win32 {
-  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-}
-"@
+              # Build the C# snippet without here-strings (YAML-safe)
+              $cs = @(
+                'using System;'
+                'using System.Runtime.InteropServices;'
+                'public static class Win32 {'
+                '  [DllImport(""' + 'user32.dll' + '"")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'
+                '}'
+              ) -join "`n"
+              Add-Type -TypeDefinition $cs
               $h = (Get-Process -Id $PID).MainWindowHandle
               [Win32]::ShowWindow($h, 6) | Out-Null   # 6 = Minimize
             } catch { Write-Host "Could not minimize console: $($_.Exception.Message)" -ForegroundColor Yellow }
 
-            # Bring Avica (if running) to foreground before running setup.py
             Start-Sleep -Seconds 5
             try {
               $avProc = Get-Process | Where-Object { $_.ProcessName -like "*avica*" } | Select-Object -First 1
@@ -127,8 +118,6 @@ public static class Win32 {
 
             Write-Host "`n=== Run setup.py (spaces-safe) ==="
             $env:PYTHONUNBUFFERED = "1"
-
-            # Execute setup.py; filter only the specific stray 'C:\Program' error if it appears
             if ($pyArgs) {
               & $python $pyArgs "setup.py" 2>&1 | ForEach-Object {
                 if ($_ -match "^\s*'C:\\Program.*is not recognized") {
