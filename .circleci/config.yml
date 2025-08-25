@@ -14,212 +14,167 @@ jobs:
           shell: powershell.exe
           no_output_timeout: 30m
           command: |
-            # Set UTF-8 encoding to prevent Unicode errors
             $env:PYTHONIOENCODING = "utf-8"
             $env:PYTHONUTF8 = "1"
             
-            Write-Host "Starting enhanced Avica setup..." -ForegroundColor Green
-            
-            # Environment info
-            Write-Host "Environment Info:" -ForegroundColor Cyan
+            Write-Host "Starting Avica setup..." -ForegroundColor Green
             Write-Host "User: $env:USERNAME"
             Write-Host "Computer: $env:COMPUTERNAME"
-            Write-Host "Working Directory: $(Get-Location)"
             python --version
             
-            # Download Avica installer
             Write-Host "Downloading Avica installer..." -ForegroundColor Yellow
             try {
                 Invoke-WebRequest -Uri "https://download.avica.com/AvicaLite_v8.0.8.9.exe" -OutFile "Avica_setup.exe"
-                Write-Host "Avica installer downloaded successfully"
+                Write-Host "Avica installer downloaded"
             } catch {
-                Write-Host "Failed to download Avica installer"
+                Write-Host "Failed to download Avica installer" -ForegroundColor Red
                 exit 1
             }
             
-            # Install Python packages
             Write-Host "Installing Python packages..." -ForegroundColor Yellow
             python -m pip install --upgrade pip --quiet
             python -m pip install requests Pillow pyautogui --quiet
-            Write-Host "Packages installed successfully"
+            Write-Host "Packages installed"
             
-            # Enable RDP
             Write-Host "Enabling RDP..." -ForegroundColor Yellow
             Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
             Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
             net user $env:USERNAME TheDisa1a
-            Write-Host "RDP configured successfully"
+            Write-Host "RDP configured"
             
-            # Install Avica
             Write-Host "Installing Avica..." -ForegroundColor Yellow
             if (Test-Path "Avica_setup.exe") {
-                Start-Process "Avica_setup.exe" -ArgumentList "/S" -Wait
+                Start-Process "Avica_setup.exe" -ArgumentList "/S" -Wait -WindowStyle Hidden
                 Write-Host "Avica installation completed"
-                Start-Sleep -Seconds 15
+                Start-Sleep -Seconds 20
             }
             
-            # Create setup.py file
             Write-Host "Creating setup script..." -ForegroundColor Yellow
             
-            $setupPyContent = @"
-import pyautogui as pag
-import time
-import requests
-import os
-import subprocess
+            $setupScript = @'
+            import pyautogui as pag
+            import time
+            import requests
+            import os
+            import subprocess
 
-time.sleep(30)
+            print("Starting Avica automation script...")
+            time.sleep(20)
 
-img_filename = 'NewAvicaRemoteID.png'
+            img_filename = 'NewAvicaRemoteID.png'
 
-def upload_image_to_gofile(img_filename):
-    url = 'https://store1.gofile.io/uploadFile'
-    try:
-        with open(img_filename, 'rb') as img_file:
-            files = {'file': img_file}
-            response = requests.post(url, files=files)
-            response.raise_for_status()
-            result = response.json()
-            if result['status'] == 'ok':
-                download_page = result['data']['downloadPage']
-                with open('show.bat', 'a') as bat_file:
-                    bat_file.write(f'\necho Avica Remote ID : {download_page}')
-                return download_page
-            else:
-                print("Upload error:", result.get('status'))
+            def upload_to_gofile(filename):
+                url = 'https://store1.gofile.io/uploadFile'
+                try:
+                    with open(filename, 'rb') as f:
+                        files = {'file': f}
+                        response = requests.post(url, files=files)
+                        response.raise_for_status()
+                        result = response.json()
+                        if result['status'] == 'ok':
+                            link = result['data']['downloadPage']
+                            with open('show.bat', 'a') as bat:
+                                bat.write(f'\necho Avica Remote ID: {link}')
+                            return link
+                        return None
+                except Exception as e:
+                    print(f"Upload failed: {e}")
+                    return None
+
+            def find_avica():
+                paths = [
+                    r"C:\Program Files (x86)\Avica\Avica.exe",
+                    r"C:\Program Files\Avica\Avica.exe",
+                    r"C:\Program Files (x86)\AvicaLite\Avica.exe",
+                    r"C:\Program Files\AvicaLite\Avica.exe"
+                ]
+                
+                for path in paths:
+                    if os.path.exists(path):
+                        print(f"Found Avica: {path}")
+                        return path
+                
+                for root_dir in [r"C:\Program Files", r"C:\Program Files (x86)"]:
+                    try:
+                        for root, dirs, files in os.walk(root_dir):
+                            for file in files:
+                                if file.lower() == 'avica.exe':
+                                    full_path = os.path.join(root, file)
+                                    print(f"Found Avica: {full_path}")
+                                    return full_path
+                    except:
+                        continue
+                
+                print("Avica not found")
                 return None
-    except Exception as e:
-        print(f"Failed to upload image: {e}")
-        return None
 
-def find_and_launch_avica():
-    search_paths = [
-        r"C:\Program Files (x86)\Avica\Avica.exe",
-        r"C:\Program Files\Avica\Avica.exe",
-        r"C:\Program Files (x86)\AvicaLite\Avica.exe",
-        r"C:\Program Files\AvicaLite\Avica.exe"
-    ]
-    
-    for path in search_paths:
-        if os.path.exists(path):
-            print(f"Found Avica at: {path}")
-            subprocess.Popen([path])
-            time.sleep(15)
-            return True
-    
-    print("Avica not found after installation")
-    return False
-
-def bring_window_to_front():
-    try:
-        powershell_cmd = '''
-        Add-Type -TypeDefinition @"
-            using System;
-            using System.Runtime.InteropServices;
-            public class Win32API {
-                [DllImport("user32.dll")]
-                public static extern bool SetForegroundWindow(IntPtr hWnd);
-                [DllImport("user32.dll")]
-                public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-            }
-"@
-
-        Get-Process | Where-Object {$_.ProcessName -like "*Avica*" -and $_.MainWindowTitle -ne ""} | ForEach-Object {
-            $hwnd = $_.MainWindowHandle
-            if ($hwnd -ne [IntPtr]::Zero) {
-                [Win32API]::ShowWindow($hwnd, 9)
-                [Win32API]::SetForegroundWindow($hwnd)
-                Write-Output "Window brought to front"
-            }
-        }
-        '''
-        
-        subprocess.run(['powershell', '-Command', powershell_cmd], 
-                      capture_output=True, text=True, timeout=10)
-        time.sleep(2)
-        return True
-    except:
-        return False
-
-def take_screenshot():
-    print("Taking screenshot...")
-    
-    # Bring Avica to front
-    bring_window_to_front()
-    
-    # Click center to ensure focus
-    pag.click(512, 384)
-    time.sleep(2)
-    
-    # Take screenshot
-    screenshot = pag.screenshot()
-    screenshot.save(img_filename)
-    print(f"Screenshot saved: {img_filename}")
-    return True
-
-# Main execution
-print("=== Starting Avica Setup Process ===")
-
-# Wait for system to stabilize
-print("Waiting for system to stabilize...")
-time.sleep(20)
-
-# Find and launch Avica
-print("Looking for installed Avica...")
-avica_found = find_and_launch_avica()
-
-if not avica_found:
-    print("Trying alternative Avica search...")
-    # Search in all Program Files
-    import os
-    for root in [r"C:\Program Files", r"C:\Program Files (x86)"]:
-        for dirpath, dirnames, filenames in os.walk(root):
-            for filename in filenames:
-                if filename.lower() == 'avica.exe':
-                    full_path = os.path.join(dirpath, filename)
-                    print(f"Found Avica at: {full_path}")
-                    subprocess.Popen([full_path])
+            def launch_avica():
+                avica_path = find_avica()
+                if avica_path:
+                    print("Launching Avica...")
+                    subprocess.Popen([avica_path])
                     time.sleep(15)
-                    avica_found = True
-                    break
-            if avica_found:
-                break
-        if avica_found:
-            break
+                    return True
+                return False
 
-# Take screenshot
-take_screenshot()
+            def focus_avica():
+                try:
+                    ps_cmd = 'Add-Type -TypeDefinition @"\nusing System;\nusing System.Runtime.InteropServices;\npublic class WinAPI {\n    [DllImport(\\"user32.dll\\")] public static extern bool SetForegroundWindow(IntPtr hWnd);\n    [DllImport(\\"user32.dll\\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\n}\n"@\n$procs = Get-Process | Where-Object {$_.ProcessName -like \\"*Avica*\\" -and $_.MainWindowHandle -ne 0}\nforeach ($p in $procs) {\n    [WinAPI]::ShowWindow($p.MainWindowHandle, 9)\n    [WinAPI]::SetForegroundWindow($p.MainWindowHandle)\n}'
+                    subprocess.run(['powershell', '-Command', ps_cmd], timeout=10)
+                    time.sleep(3)
+                    return True
+                except:
+                    return False
 
-# Upload screenshot
-print("Uploading screenshot...")
-gofile_link = upload_image_to_gofile(img_filename)
-if gofile_link:
-    print(f"SUCCESS! Image uploaded: {gofile_link}")
-else:
-    print("Failed to upload image")
+            def capture_screen():
+                print("Taking screenshot...")
+                focus_avica()
+                pag.click(500, 400)
+                time.sleep(2)
+                screenshot = pag.screenshot()
+                screenshot.save(img_filename)
+                print(f"Screenshot saved: {img_filename}")
+                return True
 
-print("Process completed!")
-"@
+            print("=== Avica Automation Started ===")
+
+            if launch_avica():
+                print("Avica launched successfully")
+            else:
+                print("Could not launch Avica, taking desktop screenshot anyway")
+
+            print("Waiting for interface to load...")
+            time.sleep(10)
+
+            capture_screen()
+
+            print("Uploading screenshot...")
+            link = upload_to_gofile(img_filename)
+            if link:
+                print(f"SUCCESS! Screenshot uploaded: {link}")
+            else:
+                print("Upload failed")
+
+            print("=== Process Complete ===")
+            '@
             
-            # Write the setup.py file
-            $setupPyContent | Out-File -FilePath "setup.py" -Encoding UTF8
-            Write-Host "Setup script created successfully"
+            $setupScript | Out-File -FilePath "setup.py" -Encoding UTF8
+            Write-Host "Setup script created"
             
-            # Run the setup script
-            Write-Host "Running setup script..." -ForegroundColor Yellow
+            Write-Host "Running automation script..." -ForegroundColor Yellow
             python setup.py
             
-            Write-Host "Setup completed!" -ForegroundColor Green
+            Write-Host "All done!" -ForegroundColor Green
 
       - run:
-          name: Keep Session Active
+          name: Keep Session Active  
           shell: cmd.exe
           no_output_timeout: 6h
           command: |
-            echo Starting session keeper...
+            echo Keeping session active...
             :loop
             timeout /t 300 /nobreak >nul 2>&1
-            echo Still running... %time%
+            echo Still alive at %time%
             goto loop
 
 workflows:
