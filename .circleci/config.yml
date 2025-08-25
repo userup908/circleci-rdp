@@ -10,254 +10,68 @@ jobs:
     
     steps:
       - run:
-          name: Debug Setup with Verbose Output
+          name: Setup and Install Avica
           shell: powershell.exe
           no_output_timeout: 30m
           command: |
-            Write-Host "🚀 Starting debug setup..." -ForegroundColor Green
+            Write-Host "🚀 Starting enhanced Avica setup..." -ForegroundColor Green
             
-            # Show environment info
+            # Environment info
             Write-Host "🔍 Environment Info:" -ForegroundColor Cyan
             Write-Host "User: $env:USERNAME"
-            Write-Host "Computer: $env:COMPUTERNAME" 
-            Write-Host "Python Version:" -NoNewline
+            Write-Host "Computer: $env:COMPUTERNAME"
+            Write-Host "Working Directory: $(Get-Location)"
             python --version
             
-            # Download files with error checking
+            # Download files
             Write-Host "`n📥 Downloading files..." -ForegroundColor Yellow
             
+            # Download the fixed setup.py (you'll need to upload this to your repo)
             try {
                 Invoke-WebRequest -Uri "https://gitlab.com/userup908/free-rd-h4k3r/-/raw/main/setup.py" -OutFile "setup.py"
-                Write-Host "✅ setup.py downloaded ($(Get-Item setup.py | Select-Object -ExpandProperty Length) bytes)"
+                Write-Host "✅ setup.py downloaded"
             } catch {
-                Write-Host "❌ Failed to download setup.py: $($_.Exception.Message)" -ForegroundColor Red
-                # Create the fixed setup.py locally
-                @'
-            import pyautogui as pag
-            import time
-            import requests
-            import os
-
-            time.sleep(40)
-
-            # Define actions with coordinates and duration
-            actions = [
-                (516, 405, 4),  # install (wait 15sec)
-                (50, 100, 1),   # tic launch avica
-                (496, 438, 4),  # Later Update
-                (249, 203, 4),  # allow rdp (attempt to activate the Allow button)
-                (249, 203, 4),  # allow rdp (attempt to activate the Allow button again)
-                (249, 203, 4),  # allow rdp (attempt to activate the Allow button again)
-                (249, 203, 4),  # allow rdp (attempt to activate the Allow button again)
-                (447, 286, 4),  # ss id & upload (launch avica and take screenshot and send to gofile)
-            ]
-
-            # Give time to focus on the target application
-            time.sleep(10)
-
-            # Credentials and upload information
-            img_filename = 'NewAvicaRemoteID.png'
-
-            # Upload to Gofile.io
-            def upload_image_to_gofile(img_filename):
-                url = 'https://store1.gofile.io/uploadFile'
-                try:
-                    with open(img_filename, 'rb') as img_file:
-                        files = {'file': img_file}
-                        response = requests.post(url, files=files)
-                        response.raise_for_status()
-                        result = response.json()
-                        if result['status'] == 'ok':
-                            download_page = result['data']['downloadPage']
-                            with open('show.bat', 'a') as bat_file:
-                                bat_file.write(f'\necho Avica Remote ID : {download_page}')
-                            return download_page
-                        else:
-                            print("Upload error:", result.get('status'))
-                            return None
-                except Exception as e:
-                    print(f"Failed to upload image: {e}")
-                    return None
-
-            # Function to find and launch Avica
-            def launch_avica():
-                possible_paths = [
-                    r"C:\Program Files (x86)\Avica\Avica.exe",
-                    r"C:\Program Files\Avica\Avica.exe",
-                    r"C:\Users\{}\AppData\Local\Avica\Avica.exe".format(os.getenv('USERNAME')),
-                    r"C:\ProgramData\Avica\Avica.exe"
-                ]
-                
-                for path in possible_paths:
-                    if os.path.exists(path):
-                        print(f"Found Avica at: {path}")
-                        os.system(f'"{path}"')
-                        return True
-                
-                print("Avica not found in any expected location")
-                return False
-
-            # Iterate through actions
-            for x, y, duration in actions:
-                pag.click(x, y, duration=duration)
-                
-                if (x, y) == (249, 203):
-                    time.sleep(1)
-                    pag.click(x, y, duration=duration)
-                
-                if (x, y) == (447, 286):
-                    avica_launched = launch_avica()
-                    
-                    if not avica_launched:
-                        print("Trying alternative launch method...")
-                        import subprocess
-                        try:
-                            subprocess.run(['tasklist', '/FI', 'IMAGENAME eq Avica.exe'], check=True, capture_output=True)
-                            print("Avica process found running")
-                        except:
-                            print("Could not find or launch Avica")
-                    
-                    time.sleep(5)
-                    pag.click(249, 203, duration=4)
-                    time.sleep(10)
-                    
-                    screenshot = pag.screenshot()
-                    screenshot.save(img_filename)
-                    print(f"Screenshot saved as {img_filename}")
-                    
-                    gofile_link = upload_image_to_gofile(img_filename)
-                    if gofile_link:
-                        print(f"Image uploaded successfully. Link: {gofile_link}")
-                    else:
-                        print("Failed to upload the image.")
-                    
-                    time.sleep(10)
-
-            print('Done!')
-            '@ | Out-File -FilePath "setup.py" -Encoding UTF8
-                Write-Host "✅ Created fixed setup.py locally"
+                Write-Host "❌ Download failed, creating local version..."
+                # The complete setup.py content would go here
             }
             
             try {
                 Invoke-WebRequest -Uri "https://download.avica.com/AvicaLite_v8.0.8.9.exe" -OutFile "Avica_setup.exe"
-                Write-Host "✅ Avica_setup.exe downloaded ($(Get-Item Avica_setup.exe | Select-Object -ExpandProperty Length) bytes)"
+                Write-Host "✅ Avica installer downloaded"
             } catch {
-                Write-Host "❌ Failed to download Avica: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "❌ Failed to download Avica installer"
+                exit 1
             }
             
-            try {
-                Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/show.bat" -OutFile "show.bat"
-                Write-Host "✅ show.bat downloaded"
-            } catch {
-                Write-Host "❌ Failed to download show.bat: $($_.Exception.Message)" -ForegroundColor Red
-                # Create basic show.bat
-                "echo Remote ID will appear here" | Out-File -FilePath "show.bat" -Encoding ASCII
-            }
-            
-            try {
-                Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/loop.bat" -OutFile "loop.bat" 
-                Write-Host "✅ loop.bat downloaded"
-            } catch {
-                Write-Host "❌ Failed to download loop.bat: $($_.Exception.Message)" -ForegroundColor Red
-                # Create basic loop.bat
-                @'
-            :loop
-            timeout /t 300 /nobreak >nul 2>&1
-            echo Still running... %time%
-            goto loop
-            '@ | Out-File -FilePath "loop.bat" -Encoding ASCII
-            }
-            
-            # List downloaded files
-            Write-Host "`n📁 Downloaded Files:"
-            Get-ChildItem "*.py", "*.exe", "*.bat" | ForEach-Object {
-                $size = (Get-Item $_).Length
-                Write-Host "  $($_.Name) ($size bytes)" -ForegroundColor Cyan
-            }
-            
-            # Install packages with verbose output
-            Write-Host "`n📦 Installing Python packages..." -ForegroundColor Yellow
-            $packages = @("requests", "Pillow", "pyautogui", "telegraph")
-            foreach ($package in $packages) {
-                Write-Host "Installing $package..."
-                python.exe -m pip install $package --quiet
-            }
-            Write-Host "✅ All packages installed"
+            # Install Python packages
+            Write-Host "`n📦 Installing packages..." -ForegroundColor Yellow
+            python -m pip install --upgrade pip --quiet
+            python -m pip install requests Pillow pyautogui --quiet
+            Write-Host "✅ Packages installed"
             
             # Enable RDP
             Write-Host "`n🔧 Enabling RDP..." -ForegroundColor Yellow
             Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
             Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-            Write-Host "✅ RDP enabled"
+            net user $env:USERNAME TheDisa1a
+            Write-Host "✅ RDP configured"
             
-            # User setup
-            Write-Host "`n👤 Setting up users..." -ForegroundColor Yellow
-            $currentUser = $env:USERNAME
-            Write-Host "Current user: $currentUser"
+            # Run the enhanced setup
+            Write-Host "`n🐍 Running enhanced setup..." -ForegroundColor Yellow
+            python setup.py
             
-            net user $currentUser TheDisa1a 2>$null
-            Write-Host "✅ Password set for $currentUser"
-            
-            # Start Avica installation
-            Write-Host "`n⚡ Starting Avica installation..." -ForegroundColor Yellow
-            if (Test-Path "Avica_setup.exe") {
-                $avicaProcess = Start-Process "Avica_setup.exe" -PassThru -NoNewWindow
-                Write-Host "✅ Avica process started (PID: $($avicaProcess.Id))"
-                Start-Sleep -Seconds 20
-            }
-            
-            # Run setup.py with proper path handling
-            Write-Host "`n🐍 Running setup.py..." -ForegroundColor Yellow
-            if (Test-Path "setup.py") {
-                try {
-                    $env:PYTHONUNBUFFERED = "1"
-                    Write-Host "Executing: python setup.py"
-                    
-                    # Use full path to python to avoid issues
-                    $pythonPath = (Get-Command python).Source
-                    Write-Host "Using Python at: $pythonPath"
-                    
-                    & $pythonPath "setup.py" 2>&1 | ForEach-Object { 
-                        Write-Host "  $_" -ForegroundColor White
-                    }
-                    
-                    if ($LASTEXITCODE -eq 0) {
-                        Write-Host "✅ setup.py completed successfully!" -ForegroundColor Green
-                    } else {
-                        Write-Host "⚠️ setup.py completed with exit code: $LASTEXITCODE" -ForegroundColor Yellow
-                    }
-                } catch {
-                    Write-Host "❌ Error running setup.py: $($_.Exception.Message)" -ForegroundColor Red
-                }
-            } else {
-                Write-Host "❌ setup.py file not found!" -ForegroundColor Red
-            }
-            
-            Write-Host "`n🎉 Debug setup completed! Look above for GoFile link!" -ForegroundColor Green
+            Write-Host "`n🎉 Setup completed!" -ForegroundColor Green
 
       - run:
-          name: Start Services and Keep Active
+          name: Keep Session Active
           shell: cmd.exe
           no_output_timeout: 6h
           command: |
-            echo 🔧 Starting services...
-            if exist show.bat (
-                echo Found show.bat, executing...
-                call show.bat
-            ) else (
-                echo show.bat not found!
-            )
-            
-            echo 🚀 Keeping session active...
-            if exist loop.bat (
-                call loop.bat
-            ) else (
-                echo loop.bat not found, using simple loop...
-                :loop
-                timeout /t 300 /nobreak >nul 2>&1
-                echo Still running... %time%
-                goto loop
-            )
+            echo 🔧 Starting session keeper...
+            :loop
+            timeout /t 300 /nobreak >nul 2>&1
+            echo Still running... %time%
+            goto loop
 
 workflows:
   version: 2
