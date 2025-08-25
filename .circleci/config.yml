@@ -112,26 +112,30 @@ jobs:
             
             # Start Avica installation in background
             if (Test-Path "Avica_setup.exe") {
-                Start-Process -FilePath "Avica_setup.exe" -ArgumentList "/S" -NoNewWindow
-                Write-Host "✅ Avica installation started" -ForegroundColor Green
+                $avicaJob = Start-Process -FilePath "Avica_setup.exe" -ArgumentList "/S" -PassThru -NoNewWindow
+                Write-Host "✅ Avica installation started (PID: $($avicaJob.Id))" -ForegroundColor Green
             }
             
             # Wait briefly for installation
             Start-Sleep -Seconds 30
             
-            # Run setup script immediately
+            # Run setup script in background
             if (Test-Path "setup.py") {
                 Write-Host "🐍 Running setup script..." -ForegroundColor Yellow
-                python.exe setup.py 2>$null &
-                Write-Host "✅ Setup script started" -ForegroundColor Green
+                $setupJob = Start-Job -ScriptBlock { python.exe setup.py }
+                Write-Host "✅ Setup script started (Job ID: $($setupJob.Id))" -ForegroundColor Green
             }
             
-            # Start services immediately
+            # Start services in background
             Start-Sleep -Seconds 10
             if (Test-Path "show.bat") {
-                cmd /c "show.bat" 2>$null &
-                Write-Host "✅ Services started" -ForegroundColor Green
+                $serviceJob = Start-Job -ScriptBlock { cmd /c "show.bat" }
+                Write-Host "✅ Services started (Job ID: $($serviceJob.Id))" -ForegroundColor Green
             }
+            
+            # Show job status
+            Start-Sleep -Seconds 5
+            Get-Job | Format-Table -AutoSize
             
             Write-Host "🎉 Quick setup completed! Check output above for connection details!" -ForegroundColor Green
             
