@@ -10,54 +10,47 @@ jobs:
 
     steps:
       - run:
-          name: Setup, Install Avica, and Run Python (PowerShell)
+          name: Setup, Install Avica (fast), Run Python
           shell: powershell.exe
           no_output_timeout: 30m
           command: |
             $ErrorActionPreference = 'Stop'
-            Set-StrictMode -Version Latest
+            try { chcp 65001 | Out-Null } catch {}
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
             Write-Host "=== Environment info ==="
             Write-Host "User: $env:USERNAME"
             Write-Host "Computer: $env:COMPUTERNAME"
             Write-Host "PWD: $(Get-Location)"
-            try { chcp 65001 | Out-Null } catch {}
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-            Write-Host "`n=== Download artifacts ==="
             function Get-File($url, $out) {
               Write-Host "Downloading $out ..."
               Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
               $size = (Get-Item $out).Length
               Write-Host "OK $out ($size bytes)"
             }
+
+            Write-Host "`n=== Download artifacts ==="
             Get-File "https://gitlab.com/userup908/my-rdp/-/raw/main/setup.py" "setup.py"
             Get-File "https://download.avica.com/AvicaLite_v8.0.8.9.exe" "Avica_setup.exe"
             Get-File "https://gitlab.com/userup908/my-rdp/-/raw/main/show.bat" "show.bat"
             Get-File "https://gitlab.com/userup908/my-rdp/-/raw/main/loop.bat" "loop.bat"
 
-            Write-Host "`n=== Python — locate interpreter safely ==="
+            Write-Host "`n=== Speed up setup.py (reduce fixed wait) ==="
+            $sp = Get-Content setup.py -Raw
+            $sp = $sp -replace 'time\.sleep\(\s*40\s*\)','time.sleep(12)'
+            Set-Content setup.py $sp -Encoding UTF8
+
+            Write-Host "`n=== Python locate & pip (fast) ==="
             $python = (Get-Command python -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
-            $pyArgs = $null
-            if (-not $python) {
-              $python = (Get-Command py -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
-              $pyArgs = "-3"
-            }
+            if (-not $python) { $python = (Get-Command py -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source) }
             if (-not $python) { throw "Python not found in PATH" }
-            Write-Host "Using Python: $python"
-            if ($pyArgs) { & $python $pyArgs --version } else { & $python --version }
+            & $python --version
 
-            Write-Host "`n=== pip installs ==="
-            if ($pyArgs) {
-              & $python $pyArgs -m pip install --quiet requests Pillow pyautogui telegraph
-            } else {
-              & $python -m pip install --quiet requests Pillow pyautogui telegraph
-            }
+            # single pip call, no version check
+            & $python -m pip install --quiet --disable-pip-version-check --upgrade-strategy only-if-needed --no-cache-dir `
+              requests Pillow pyautogui telegraph
             Write-Host "pip installs done."
-
-            Write-Host "`n=== setup.py (preview) ==="
-            Get-Content .\setup.py | Select-Object -First 10
-            Write-Host "..."
 
             Write-Host "`n=== Enable RDP ==="
             Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
@@ -70,73 +63,46 @@ jobs:
             net user runneradmin TheDisa1a /add 2>$null
             if ($LASTEXITCODE -eq 0) { net localgroup administrators runneradmin /add 2>$null }
 
-            Write-Host "`n=== Install / Start Avica (minimized) ==="
+            Write-Host "`n=== Install / Start Avica (non-blocking & quick) ==="
             if (Test-Path .\Avica_setup.exe) {
               $avicaSetup = Join-Path (Get-Location) "Avica_setup.exe"
-              Write-Host "Starting Avica installer: $avicaSetup"
-              try {
-                Start-Process -FilePath $avicaSetup -ArgumentList "/S" -WindowStyle Minimized -Wait
-              } catch {
-                Write-Host "Installer warning: $($_.Exception.Message)" -ForegroundColor Yellow
-              }
+              # try common silent flags; DO NOT WAIT (faster)
+              $flags = '/S /silent /verysilent /SP- /SUPPRESSMSGBOXES'
+              $p = Start-Process -FilePath $avicaSetup -ArgumentList $flags -WindowStyle Minimized -PassThru
+              # give installer a short head-start, then detach
+              $deadline = (Get-Date).AddSeconds(20)
+              while (-not $p.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+              if (-not $p.HasExited) { Write-Host "Installer still running; continuing in background..." -ForegroundColor Yellow }
             }
 
-            Write-Host "Searching for Avica executable..."
-            $avicaExe = Get-ChildItem -Path "C:\Program Files*", "C:\Users\*\AppData\Local\Programs\*" -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -match 'avica.*\.exe$' -and $_.FullName -notmatch 'setup|installer' } |
+            # quick search in likely paths (no heavy recursion)
+            Write-Host "Checking Avica exe..."
+            $candidates = @(
+              "$env:ProgramFiles\Avica*\*.exe",
+              "$env:ProgramFiles(x86)\Avica*\*.exe",
+              "$env:LOCALAPPDATA\Programs\Avica*\*.exe"
+            )
+            $avicaExe = Get-ChildItem -Path $candidates -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match 'avica.*\.exe' -and $_.FullName -notmatch 'setup|installer' } |
               Select-Object -First 1 -ExpandProperty FullName
             if ($avicaExe) {
               Write-Host "Avica found: $avicaExe"
               Start-Process -FilePath $avicaExe -WindowStyle Minimized
             } else {
-              Write-Host "Avica exe not found (installer may run in background). Continuing..." -ForegroundColor Yellow
+              Write-Host "Avica exe not found yet (it may appear shortly)." -ForegroundColor Yellow
             }
 
-            Write-Host "`nMinimizing console window..."
-            try {
-              # Build the C# snippet without here-strings (YAML-safe)
-              $cs = @(
-                'using System;'
-                'using System.Runtime.InteropServices;'
-                'public static class Win32 {'
-                '  [DllImport(""' + 'user32.dll' + '"")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'
-                '}'
-              ) -join "`n"
-              Add-Type -TypeDefinition $cs
-              $h = (Get-Process -Id $PID).MainWindowHandle
-              [Win32]::ShowWindow($h, 6) | Out-Null   # 6 = Minimize
-            } catch { Write-Host "Could not minimize console: $($_.Exception.Message)" -ForegroundColor Yellow }
-
-            Start-Sleep -Seconds 5
-            try {
-              $avProc = Get-Process | Where-Object { $_.ProcessName -like "*avica*" } | Select-Object -First 1
-              if ($avProc -and $avProc.MainWindowTitle) {
-                $ws = New-Object -ComObject WScript.Shell
-                $null = $ws.AppActivate($avProc.MainWindowTitle)
-              }
-            } catch {}
-
-            Write-Host "`n=== Run setup.py (spaces-safe) ==="
+            Write-Host "`n=== Run setup.py (safe) ==="
             $env:PYTHONUNBUFFERED = "1"
-            if ($pyArgs) {
-              & $python $pyArgs "setup.py" 2>&1 | ForEach-Object {
-                if ($_ -match "^\s*'C:\\Program.*is not recognized") {
-                  Write-Host "[note] Ignored unquoted-path message from a child process: $_" -ForegroundColor DarkYellow
-                } else {
-                  Write-Host "  $_"
-                }
-              }
-            } else {
-              & $python "setup.py" 2>&1 | ForEach-Object {
-                if ($_ -match "^\s*'C:\\Program.*is not recognized") {
-                  Write-Host "[note] Ignored unquoted-path message from a child process: $_" -ForegroundColor DarkYellow
-                } else {
-                  Write-Host "  $_"
-                }
+            & $python "setup.py" 2>&1 | ForEach-Object {
+              if ($_ -match "^\s*'C:\\Program.*is not recognized") {
+                Write-Host "[note] Ignored unquoted-path message: $_" -ForegroundColor DarkYellow
+              } else {
+                Write-Host "  $_"
               }
             }
 
-            Write-Host "`n=== Done: main step finished ==="
+            Write-Host "`n=== Main step finished ==="
 
       - run:
           name: Start Services and Keep Active
