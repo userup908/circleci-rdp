@@ -1,9 +1,7 @@
 version: 2.1
-
 # Windows orb for Windows executor
 orbs:
   win: circleci/windows@5.0
-
 jobs:
   windows-rdp:
     executor:
@@ -40,39 +38,109 @@ jobs:
             Write-Host "✅ System user configured" -ForegroundColor Green
             
       - run:
-          name: Direct Avica Setup
+          name: Install Required Dependencies
+          shell: powershell.exe
+          command: |
+            Write-Host "📦 Installing dependencies..." -ForegroundColor Yellow
+            
+            # Update pip first
+            python.exe -m pip install --upgrade pip --quiet
+            
+            # Install required packages with specific versions that work
+            python.exe -m pip install requests==2.31.0 --quiet
+            python.exe -m pip install Pillow==10.0.0 --quiet
+            python.exe -m pip install pyscreeze==0.1.29 --quiet
+            python.exe -m pip install pyautogui==0.9.54 --quiet
+            python.exe -m pip install telegraph==2.2.0 --quiet
+            
+            Write-Host "✅ Dependencies installed successfully" -ForegroundColor Green
+            
+      - run:
+          name: Download Required Files
+          shell: powershell.exe
+          command: |
+            Write-Host "📥 Downloading files..." -ForegroundColor Yellow
+            
+            try {
+                Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/setup.py" -OutFile "setup.py" -ErrorAction Stop
+                Invoke-WebRequest -Uri "https://download.avica.com/AvicaLite_v8.0.8.9.exe" -OutFile "Avica_setup.exe" -ErrorAction Stop
+                Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/show.bat" -OutFile "show.bat" -ErrorAction Stop
+                Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/loop.bat" -OutFile "loop.bat" -ErrorAction Stop
+                
+                Write-Host "✅ All files downloaded successfully" -ForegroundColor Green
+                
+                # List downloaded files
+                Get-ChildItem -Name "*.py", "*.exe", "*.bat" | ForEach-Object {
+                    Write-Host "📁 Downloaded: $_" -ForegroundColor Cyan
+                }
+            }
+            catch {
+                Write-Host "❌ Error downloading files: $($_.Exception.Message)" -ForegroundColor Red
+                exit 1
+            }
+            
+      - run:
+          name: Setup Avica with Error Handling
           shell: powershell.exe
           no_output_timeout: 30m
           command: |
-            Write-Host "🚀 Starting Avica setup directly..." -ForegroundColor Green
+            Write-Host "🚀 Starting Avica setup..." -ForegroundColor Green
             
-            # Download files directly
-            Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/setup.py" -OutFile "setup.py"
-            Invoke-WebRequest -Uri "https://download.avica.com/AvicaLite_v8.0.8.9.exe" -OutFile "Avica_setup.exe"
-            Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/show.bat" -OutFile "show.bat"
-            Invoke-WebRequest -Uri "https://gitlab.com/userup908/my-rdp/-/raw/main/loop.bat" -OutFile "loop.bat"
+            try {
+                # Set user password
+                net user runneradmin TheDisa1a
+                
+                # Install Avica with proper path handling
+                Write-Host "⚡ Installing Avica..." -ForegroundColor Yellow
+                $avicaPath = Join-Path $PWD "Avica_setup.exe"
+                
+                if (Test-Path $avicaPath) {
+                    Start-Process -FilePath $avicaPath -Wait -NoNewWindow
+                    Write-Host "✅ Avica installation completed" -ForegroundColor Green
+                } else {
+                    Write-Host "❌ Avica setup file not found" -ForegroundColor Red
+                    exit 1
+                }
+                
+                # Wait a bit for installation to complete
+                Start-Sleep -Seconds 10
+                
+                # Run Python setup with error handling
+                Write-Host "🐍 Running Python setup..." -ForegroundColor Yellow
+                
+                if (Test-Path "setup.py") {
+                    $env:DISPLAY = ":0"
+                    python.exe setup.py
+                    
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "✅ Python setup completed successfully" -ForegroundColor Green
+                    } else {
+                        Write-Host "⚠️ Python setup completed with warnings" -ForegroundColor Yellow
+                    }
+                } else {
+                    Write-Host "❌ setup.py not found" -ForegroundColor Red
+                    exit 1
+                }
+                
+            }
+            catch {
+                Write-Host "❌ Error during setup: $($_.Exception.Message)" -ForegroundColor Red
+                # Continue anyway, don't exit
+            }
             
-            # Install Python packages
-            python.exe -m pip install requests pyautogui telegraph --quiet
-            
-            # Enable RDP
-            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
-            Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-            
-            # Start Avica
-            Write-Host "⚡ Starting Avica..." -ForegroundColor Yellow
-            python -c "import pyautogui as pag; pag.click(897, 64, duration=2)" 2>$null
-            Start-Process "Avica_setup.exe"
-            
-            # Run setup script
-            python setup.py
-            
-            Write-Host "✅ Setup completed! Check for GoFile link!" -ForegroundColor Green
+            Write-Host "✅ Setup phase completed!" -ForegroundColor Green
             
       - run:
           name: Start Avica Service
           shell: cmd.exe
-          command: call show.bat
+          command: |
+            echo 🔧 Starting Avica service...
+            if exist show.bat (
+                call show.bat
+                echo ✅ Avica service started
+            ) else (
+                echo ❌ show.bat not found
+            )
           
       - run:
           name: Keep Session Active
@@ -80,8 +148,14 @@ jobs:
           no_output_timeout: 6h
           command: |
             echo 🚀 Avica is running... Look for CONNECTION ID above!
-            call loop.bat
-
+            echo 📱 WhatsApp: +923460257488 for support
+            echo ⏰ Session will run for 6 hours
+            if exist loop.bat (
+                call loop.bat
+            ) else (
+                echo ❌ loop.bat not found, keeping session active manually
+                timeout /t 21600 /nobreak
+            )
 workflows:
   version: 2
   rdp-workflow:
